@@ -71,6 +71,7 @@ class bLResNet(nn.Module):
                                bias=False)
         self.bn1 = nn.BatchNorm2d(num_channels[0])
         self.relu = nn.ReLU(inplace=True)
+        #stem
         self.b_conv0 = nn.Conv2d(num_channels[0], num_channels[0], kernel_size=3, stride=2, padding=1, bias=False)
         self.bn_b0 = nn.BatchNorm2d(num_channels[0])
         self.l_conv0 = nn.Conv2d(num_channels[0], num_channels[0] // alpha,
@@ -120,7 +121,7 @@ class bLResNet(nn.Module):
 
         layers = []
         layers.append(block(inplanes, planes, stride, downsample))
-        for i in range(1, blocks):
+        for _ in range(1, blocks):
             layers.append(block(planes, planes))
 
         return nn.Sequential(*layers)
