@@ -10,15 +10,18 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-#this module consolidates blresnet, blresnext and blseresnext
-#when not otherwise specified basewidth and cardinality each default to 64 and 1 which is the default for resnet50
+#this module consolidates blresnext and blseresnext
 #use_se defaults to False which devolves the model into non-se
+
+#adapted by Chris Ha https://github.com/VRandme
 
 #TODO : further adapt this model to follow the style of pytorch image models by rwightman
 #TODO : integrate Activation layer factory
 #TODO : integrate Norm layer factory
 #TODO : integrate Attention layer factory
 #TODO : style match parameters(capitalization, order, etc)
+
+#TODO : fix original weight porting
 
 #TODO : make all but bLSEResNeXt(and maybe blModule), imported from pytorch image model resnet
 #TODO : finally, only leave plain blresnet?? and/or blModule here
@@ -66,20 +69,14 @@ class SEModule(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, basewidth=64, cardinality=1, stride=1, downsample=None, last_relu=True, use_se=True):
+    def __init__(self, inplanes, planes, basewidth, cardinality, stride=1, downsample=None, last_relu=True, use_se=True):
         super(Bottleneck, self).__init__()
 
-        #make C=1 default and make that case the same as plain resnet without groups to consolidate blresnet with blseresnext.py
-        # D * C is planes // self.expansion in case of plain resnets
-        
-        C = cardinality
-        D = int(math.floor(planes * (basewidth / 64.0))) // self.expansion if C is not 1 else planes // self.expansion
 
         self.conv1 = nn.Conv2d(inplanes, D * C, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(D * C)
         self.conv2 = nn.Conv2d(D * C, D * C, kernel_size=3, stride=stride,
                                padding=1, bias=False, groups=C)
-                               #when groups = 1 this is just plain old convolution
 
         self.bn2 = nn.BatchNorm2d(D*C)
         self.conv3 = nn.Conv2d(D*C, planes, kernel_size=1, bias=False)
@@ -119,7 +116,7 @@ class Bottleneck(nn.Module):
 
 
 class bLModule(nn.Module):
-    def __init__(self, block, in_channels, out_channels, blocks, basewidth=64, cardinality=1, alpha=2, beta=4, stride=1):
+    def __init__(self, block, in_channels, out_channels, blocks, basewidth, cardinality, alpha, beta, stride):
         super(bLModule, self).__init__()
 
         self.relu = nn.ReLU(inplace=True)
@@ -177,8 +174,7 @@ class bLSEResNeXt(nn.Module):
 
         self.b_conv0 = nn.Conv2d(num_channels[0], num_channels[0], kernel_size=3, stride=2, padding=1, bias=False)
         self.bn_b0 = nn.BatchNorm2d(num_channels[0])
-        self.l_conv0 = nn.Conv2d(num_channels[0], num_channels[0] // alpha,
-                                 kernel_size=3, stride=1, padding=1, bias=False)
+        self.l_conv0 = nn.Conv2d(num_channels[0], num_channels[0] // alpha, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn_l0 = nn.BatchNorm2d(num_channels[0] // alpha)
         self.l_conv1 = nn.Conv2d(num_channels[0] // alpha, num_channels[0] //
                                  alpha, kernel_size=3, stride=2, padding=1, bias=False)
@@ -269,20 +265,6 @@ class bLSEResNeXt(nn.Module):
 
         return x
 
-
-def blresnet_model(depth, alpha, beta, num_classes=1000, pretrained=False):
-    layers = {
-        50: [3, 4, 6, 3],
-        101: [4, 8, 18, 3],
-        152: [5, 12, 30, 3]
-    }[depth]
-    model = bLSEResNeXt(Bottleneck, layers, alpha, beta, num_classes)
-
-    if pretrained:
-        url = model_urls['blresnet-{}-a{}-b{}'.format(depth, alpha, beta)]
-        checkpoint = torch.load(url)
-        model.load_state_dict(checkpoint['state_dict'])
-    return model
 
 def blresnext_model(depth, basewidth, cardinality, alpha, beta, use_se=False,
                     num_classes=1000, pretrained=False):
