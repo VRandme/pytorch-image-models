@@ -10,14 +10,35 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
+#this module consolidates blresnet, blresnext and blseresnext
+#when not otherwise specified basewidth and cardinality each default to 64 and 1 which is the default for resnet50
+#use_se defaults to False which devolves the model into non-se
+
+#TODO : further adapt this model to follow the style of pytorch image models by rwightman
+#TODO : integrate Activation layer factory
+#TODO : integrate Norm layer factory
+#TODO : integrate Attention layer factory
+#TODO : style match parameters(capitalization, order, etc)
+
+#TODO : make all but bLSEResNeXt(and maybe blModule), imported from pytorch image model resnet
+#TODO : finally, only leave plain blresnet?? and/or blModule here
+
 import math
 
 import torch
 import torch.nn as nn
 
-from ._model_urls import model_urls
+model_urls = {
+    'blresnet-50-a2-b4': 'pretrained/ImageNet-bLResNet-50-a2-b4.pth.tar',
+    'blresnet-101-a2-b4': 'pretrained/ImageNet-bLResNet-101-a2-b4.pth.tar',
+    'blresnext-50-32x4d-a2-b4': 'pretrained/ImageNet-bLResNeXt-50-32x4d-a2-b4.pth.tar',
+    'blresnext-101-32x4d-a2-b4': 'pretrained/ImageNet-bLResNeXt-101-32x4d-a2-b4.pth.tar',
+    'blresnext-101-64x4d-a2-b4': 'pretrained/ImageNet-bLResNeXt-101-64x4d-a2-b4.pth.tar',
+    'blseresnext-50-32x4d-a2-b4': 'pretrained/ImageNet-bLSEResNeXt-50-32x4d-a2-b4.pth.tar',
+    'blseresnext-101-32x4d-a2-b4': 'pretrained/ImageNet-bLSEResNeXt-101-32x4d-a2-b4.pth.tar',
+}
 
-__all__ = ['blseresnext_model','blresnext_model']
+__all__ = ['blresnet_model','blseresnext_model','blresnext_model']
 
 
 class SEModule(nn.Module):
@@ -45,16 +66,20 @@ class SEModule(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, basewidth, cardinality, stride=1, downsample=None, last_relu=True, use_se=True):
+    def __init__(self, inplanes, planes, basewidth=64, cardinality=1, stride=1, downsample=None, last_relu=True, use_se=True):
         super(Bottleneck, self).__init__()
 
-        D = int(math.floor(planes * (basewidth / 64.0))) // self.expansion
+        #make C=1 default and make that case the same as plain resnet without groups to consolidate blresnet with blseresnext.py
+        # D * C is planes // self.expansion in case of plain resnets
+        
         C = cardinality
+        D = int(math.floor(planes * (basewidth / 64.0))) // self.expansion if C is not 1 else planes // self.expansion
 
         self.conv1 = nn.Conv2d(inplanes, D * C, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(D * C)
         self.conv2 = nn.Conv2d(D * C, D * C, kernel_size=3, stride=stride,
                                padding=1, bias=False, groups=C)
+                               #when groups = 1 this is just plain old convolution
 
         self.bn2 = nn.BatchNorm2d(D*C)
         self.conv3 = nn.Conv2d(D*C, planes, kernel_size=1, bias=False)
@@ -94,7 +119,7 @@ class Bottleneck(nn.Module):
 
 
 class bLModule(nn.Module):
-    def __init__(self, block, in_channels, out_channels, blocks, basewidth, cardinality, alpha, beta, stride):
+    def __init__(self, block, in_channels, out_channels, blocks, basewidth=64, cardinality=1, alpha=2, beta=4, stride=1):
         super(bLModule, self).__init__()
 
         self.relu = nn.ReLU(inplace=True)
@@ -140,10 +165,11 @@ class bLModule(nn.Module):
 
 class bLSEResNeXt(nn.Module):
 
-    def __init__(self, block, layers, basewidth, cardinality, alpha, beta, use_se=True, num_classes=1000):
+    def __init__(self, block, layers, basewidth=64, cardinality=1, alpha=2, beta=4, use_se=True, num_classes=1000):
         super(bLSEResNeXt, self).__init__()
         num_channels = [64, 128, 256, 512]
         self.inplanes = 64
+
         self.conv1 = nn.Conv2d(3, num_channels[0], kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(num_channels[0])
@@ -196,6 +222,7 @@ class bLSEResNeXt(nn.Module):
             downsample.append(nn.Conv2d(inplanes, planes, kernel_size=1, padding=0, stride=1, bias=False))
             downsample.append(nn.BatchNorm2d(planes))
         downsample = None if downsample == [] else nn.Sequential(*downsample)
+
         layers = []
         layers.append(block(inplanes, planes, basewidth, cardinality, stride, downsample))
         for _ in range(1, blocks):
@@ -243,22 +270,18 @@ class bLSEResNeXt(nn.Module):
         return x
 
 
-def blseresnext_model(depth, basewidth, cardinality, alpha, beta, use_se=True,
-                      num_classes=1000, pretrained=False):
+def blresnet_model(depth, alpha, beta, num_classes=1000, pretrained=False):
     layers = {
         50: [3, 4, 6, 3],
         101: [4, 8, 18, 3],
         152: [5, 12, 30, 3]
     }[depth]
+    model = bLSEResNeXt(Bottleneck, layers, alpha, beta, num_classes)
 
-    model = bLSEResNeXt(Bottleneck, layers, basewidth, cardinality,
-                        alpha, beta, num_classes,use_se)
     if pretrained:
-        url = model_urls['blseresnext-{}-{}x{}d-a{}-b{}'.format(depth, cardinality,
-                                                                basewidth, alpha, beta)]
+        url = model_urls['blresnet-{}-a{}-b{}'.format(depth, alpha, beta)]
         checkpoint = torch.load(url)
         model.load_state_dict(checkpoint['state_dict'])
-
     return model
 
 def blresnext_model(depth, basewidth, cardinality, alpha, beta, use_se=False,
@@ -274,6 +297,24 @@ def blresnext_model(depth, basewidth, cardinality, alpha, beta, use_se=False,
     if pretrained:
         url = model_urls['blresnext-{}-{}x{}d-a{}-b{}'.format(depth, cardinality,
                                                               basewidth, alpha, beta)]
+        checkpoint = torch.load(url)
+        model.load_state_dict(checkpoint['state_dict'])
+
+    return model
+
+def blseresnext_model(depth, basewidth, cardinality, alpha, beta, use_se=True,
+                      num_classes=1000, pretrained=False):
+    layers = {
+        50: [3, 4, 6, 3],
+        101: [4, 8, 18, 3],
+        152: [5, 12, 30, 3]
+    }[depth]
+
+    model = bLSEResNeXt(Bottleneck, layers, basewidth, cardinality,
+                        alpha, beta, num_classes,use_se)
+    if pretrained:
+        url = model_urls['blseresnext-{}-{}x{}d-a{}-b{}'.format(depth, cardinality,
+                                                                basewidth, alpha, beta)]
         checkpoint = torch.load(url)
         model.load_state_dict(checkpoint['state_dict'])
 
