@@ -172,8 +172,8 @@ class Bottleneck(nn.Module):
         return x
 
 class BigLittleModule(nn.Module):
-    def __init__(self, block, in_channels, out_channels, blocks, alpha, beta, stride,act_layer=nn.ReLU,norm_layer=nn.BatchNorm2d,
-                 attn_layer=None, drop_block=None, drop_path=None):
+    def __init__(self, block, in_channels, out_channels, blocks, alpha, beta, stride, act_layer=nn.ReLU,
+                 norm_layer=nn.BatchNorm2d, attn_layer=None, drop_block=None, drop_path=None):
         super(BigLittleModule, self).__init__()
 
         self.act1 = act_layer(inplace=True)
@@ -215,8 +215,8 @@ class BigLittleModule(nn.Module):
         return out
 
 class BigLittleModuleX(nn.Module):
-    def __init__(self, block, in_channels, out_channels, blocks, basewidth, cardinality, alpha, beta, stride,
-                 act_layer=nn.ReLU,norm_layer=nn.BatchNorm2d, attn_layer=None, drop_block=None, drop_path=None):
+    def __init__(self, block, in_channels, out_channels, blocks, basewidth=64, cardinality=1, alpha=2, beta=4, stride=1,
+                 act_layer=nn.ReLU, norm_layer=nn.BatchNorm2d, attn_layer=None, drop_block=None, drop_path=None):
         super(BigLittleModuleX, self).__init__()
 
         self.act1 = act_layer(inplace=True)
@@ -230,7 +230,8 @@ class BigLittleModuleX(nn.Module):
 
         self.fusion = self._make_layer(block, out_channels, out_channels, 1, basewidth, cardinality, stride=stride)
 
-    def _make_layer(self, block, inplanes, planes, blocks, basewidth, cardinality, stride=1, norm_layer=nn.BatchNorm2d, last_relu=True):
+    def _make_layer(self, block, inplanes, planes, blocks, basewidth, cardinality, stride=1, norm_layer=nn.BatchNorm2d,
+                    last_relu=True):
         downsample = []
         if stride != 1:
             downsample.append(nn.AvgPool2d(3, stride=2, padding=1))
@@ -431,11 +432,11 @@ class BigLittleResNet(nn.Module):
             reduce_first=block_reduce_first, act_layer=act_layer, norm_layer=norm_layer,
             avg_down=avg_down, down_kernel_size=down_kernel_size, drop_path=dp, **block_args)
         self.layer1 = self._make_layer(block, *layer_args[0], **layer_kwargs)
-        #self.layer1 = self.BigLittleModule(block, *layer_args[0], **layer_kwargs)
+        #self.layer1 = self.BigLittleModuleX(block, *layer_args[0], **layer_kwargs)
         self.layer2 = self._make_layer(block, *layer_args[1], **layer_kwargs)
-        #self.layer2 = self.BigLittleModule(block, *layer_args[1], **layer_kwargs)
+        #self.layer2 = self.BigLittleModuleX(block, *layer_args[1], **layer_kwargs)
         self.layer3 = self._make_layer(block, drop_block=db_3, *layer_args[2], **layer_kwargs)
-        #self.layer3 = self.BigLittleModule(block, drop_block=db_3, *layer_args[2], **layer_kwargs)
+        #self.layer3 = self.BigLittleModuleX(block, drop_block=db_3, *layer_args[2], **layer_kwargs)
         self.layer4 = self._make_layer(block, drop_block=db_4, *layer_args[3], **layer_kwargs)
 
         # Head (Pooling and Classifier)
@@ -490,6 +491,7 @@ class BigLittleResNet(nn.Module):
 
         bx = self.b_conv0(x)
         bx = self.bn_b0(bx)
+
         lx = self.l_conv0(x)
         lx = self.bn_l0(lx)
         lx = self.act1(lx)
@@ -498,6 +500,7 @@ class BigLittleResNet(nn.Module):
         lx = self.act1(lx)
         lx = self.l_conv2(lx)
         lx = self.bn_l2(lx)
+
         x = self.act1(bx + lx)
         x = self.bl_init(x)
         x = self.bn_bl_init(x)
@@ -534,3 +537,22 @@ def blresnet_model(depth, alpha, beta, num_classes=1000, pretrained=False):
         '''
     return model
 
+def blresnext_model(depth, basewidth, cardinality, alpha, beta,
+                    num_classes=1000, pretrained=False):
+    layers = {
+        50: [3, 4, 6, 3],
+        101: [4, 8, 18, 3],
+        152: [5, 12, 30, 3]
+    }[depth]
+
+    model = BigLittleResNet(Bottleneck, layers, basewidth, cardinality,
+                      alpha, beta, num_classes)
+    '''
+    if pretrained:
+        url = model_urls['blresnext-{}-{}x{}d-a{}-b{}'.format(depth, cardinality,
+                                                              basewidth, alpha, beta)]
+        checkpoint = torch.load(url)
+        model.load_state_dict(checkpoint['state_dict'])
+    '''
+
+    return model
